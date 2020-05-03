@@ -1,0 +1,270 @@
+<h2> corona playground </h2>
+<p>
+    <div id="infected"> </div>
+    <div id="immune"> </div>
+    <div id="reproduction"> </div>
+
+</p>
+<canvas id="canvas"></canvas>
+<button onclick="start_stop()"> start / pause </button>
+<div>
+    <canvas id="canvas2"></canvas>
+</div>
+
+<style>
+    body {
+        font-family: sans-serif;
+    }
+    #canvas {
+        border: 1px solid darkslategrey;
+        border-radius: 6px;
+    }
+    #canvas2 {
+        border: 1px solid darkslategrey;
+        border-radius: 6px;
+    }
+</style>
+
+<script>
+    const setInfoDiv = (key, value) => {
+        document.getElementById(key).textContent = `${key}: ${value}`
+    }
+
+    const canvasHeight = 400, canvasWidth = 400
+
+    class Ball {
+        constructor(id, ctx, radius, color, velocity,
+            stepsUntilChange, infectionTime, timeUntilHealthy, infectionRadius) {
+            this.id = id
+            this.ctx = ctx
+            this.color = color
+            this.timeUntilHealthy = timeUntilHealthy
+            this.infectionTime = infectionTime
+            this.infectionRadius = infectionRadius
+            this._randomStart()
+            this.radius = radius
+            this.randX = this._genRand()
+            this.randY = this._genRand()
+            this.counter = 0
+            this.infectedOthers = 0
+        }
+
+        _randomStart() {
+            this.x = canvasWidth * Math.random()
+            this.y = canvasHeight * Math.random()
+            if (this.x <= 0.1 * canvasWidth && this.y <= 0.1 * canvasHeight) {
+                this.infected = true
+                this.healthyCountdown = this.timeUntilHealthy
+                this.color = 'darkred'
+            }
+        }
+
+        _genRand() {
+            return 2 * Math.random() - 1
+        }
+
+        _draw() {
+            this.ctx.beginPath()
+            this.ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI, false)
+            this.ctx.fillStyle = this.color
+            this.ctx.fill()
+
+            if (this.infected) {
+                this.ctx.beginPath()
+                this.ctx.arc(this.x, this.y, this.infectionRadius, 0, 2 * Math.PI, false)
+                this.ctx.strokeStyle = this.color
+                this.ctx.lineWidth = 0.2
+                this.ctx.stroke()
+            }
+        }
+
+        move() {
+            if (this.counter % stepsUntilChange === 0) {
+                this.randX = this._genRand()
+                this.randY = this._genRand()
+            }
+            this.counter += 1
+            this.x += velocity * this.randX
+            this.y += velocity * this.randY
+
+            if (this.x >= canvasWidth || this.y >= canvasHeight || this.x <= 0 || this.y <= 0) {
+                this.x -= 2 * velocity * this.randX
+                this.y -= 2 * velocity * this.randY
+            }
+
+            if (this.almostInfected) {
+                if (this.infectedCountdown > 0) {
+                    this.infectedCountdown -= 1
+                } else {
+                    this.infected = true
+                    this.color = 'darkred'
+                    this.almostInfected = false
+                    this.healthyCountdown = this.timeUntilHealthy
+                }
+            }
+
+            if (this.infected) {
+                if (this.healthyCountdown > 0) {
+                    this.healthyCountdown -= 1
+                } else {
+                    this.immune = true
+                    this.infected = false
+                    this.color = 'lightgrey'
+                }
+            }
+
+            
+            this._draw()
+            
+        }
+
+        setInfected() {
+            if (!this.infected && !this.almostInfected && !this.immune) {
+                this.infectedCountdown = infectionTime
+                this.almostInfected = true
+                this.color = 'orange'
+                return true
+            } else {
+                console.log('cannot infect!!')
+                return false
+            }
+        }
+
+        static collisionDetect(b1, b2, dist) {
+            return Math.sqrt((b1.x - b2.x)**2 + (b1.y - b2.y)**2) <= dist
+        }
+
+    }
+
+    const canvas = document.getElementById('canvas')
+
+    canvas.setAttribute('height',  `${canvasHeight}px`)
+    canvas.setAttribute('width',  `${canvasWidth}px`)
+
+    const ctx = canvas.getContext('2d')
+
+    var isrunning = false
+    var firstRender = true
+    var velocity = 1
+    var stepsUntilChange = 3
+    var numBalls = 250
+    var infectionRadius = 25
+    var infectionTime = 60
+    var timeUntilHealthy = 400
+
+    var dataAnalysis = []
+    var maxDataAnalysis = 1000
+    var rBuffer = []
+    var bufferCnt = 0
+    var bufferSize = 60
+
+    const saveData = (balls) => {
+        const infected = balls.filter(b => b.infected).length
+        const immune = balls.filter(b => b.immune).length
+        const reproduction = balls.filter(b => b.infected )
+            .map(b => b.infectedOthers / ( (b.timeUntilHealthy - b.healthyCountdown) / b.timeUntilHealthy) )
+            .reduce((acc, curr) => acc + curr, 0) / infected 
+        dataAnalysis.push({ infected, immune })
+        setInfoDiv('infected', infected)
+        setInfoDiv('immune', immune)
+
+        rBuffer.push(reproduction)
+        if (rBuffer.length > bufferSize) {
+            rBuffer.shift()
+        }
+        if (bufferCnt % bufferSize === 0) {
+            let avgR = rBuffer.reduce((a,b) => a + b, 0)
+            setInfoDiv('reproduction', (avgR / rBuffer.length).toFixed(1))
+        }
+        bufferCnt += 1
+
+        if (dataAnalysis.length > maxDataAnalysis) {
+            dataAnalysis.shift()
+        }
+    }
+
+
+    var myBalls = []
+
+    for (let i = 0; i < numBalls; i++) {
+        myBalls.push(
+            new Ball(i, ctx, 5, 'darkslategrey', velocity, stepsUntilChange,
+                infectionTime, timeUntilHealthy, infectionRadius)
+        )
+    }
+
+
+    const gameLoop = () => {
+        requestAnimationFrame(() => {
+            if (isrunning || firstRender) {
+                ctx.clearRect(0, 0, canvasWidth, canvasHeight)
+
+                myBalls.filter(b => b.infected).forEach(infectedBall => {
+                    myBalls.filter(d => !d.infected && !d.almostInfected && !d.immune).forEach(ball => {
+                        if (Ball.collisionDetect(infectedBall, ball, infectionRadius)) {
+                            if (ball.setInfected()) {
+                                infectedBall.infectedOthers += 1
+                            }
+                        }
+                    })
+                })
+
+                myBalls.forEach(b => b.move())
+                saveData(myBalls)
+                firstRender = false
+                drawAnalysis()
+            }
+            requestAnimationFrame(gameLoop)
+        })
+    }
+
+    gameLoop()
+
+    const start_stop = () => {
+        console.log('start stop called')
+        isrunning = !isrunning
+    }
+
+
+    const drawAnalysis = () => {
+        const canvasHeight = 150, canvasWidth = 900
+        const canvas = document.getElementById('canvas2')
+
+        canvas.setAttribute('height',  `${canvasHeight}px`)
+        canvas.setAttribute('width',  `${canvasWidth}px`)
+
+        const ctx = canvas.getContext('2d')
+
+        const numPoints = dataAnalysis.length || 0
+
+        if (numPoints === 0) {
+            return
+        }
+
+        const xScale = (pointIdx) => {
+            return pointIdx * (canvasWidth / numPoints)
+        }
+
+        const yScale = (key, pointIdx) => {
+            const min = 0
+            const max = Math.max(...dataAnalysis.map(d => d[key]))
+            const value = dataAnalysis[pointIdx][key]
+
+            return canvasHeight - (canvasHeight / max) * value
+        }
+
+        // begin drawing
+        dataAnalysis.forEach((d,i) => {
+            if (i === 0) {
+                ctx.beginPath()
+                ctx.moveTo(xScale(i), yScale('infected', i))
+            } else {
+                ctx.lineTo(xScale(i), yScale('infected', i))
+            }
+        })
+
+        ctx.stroke()
+        
+    }
+
+</script>
